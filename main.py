@@ -1,26 +1,43 @@
+import os
+import json
+import threading
 import telebot
 from telebot import types
 from flask import Flask
-import threading
+from dotenv import load_dotenv
 
-# --- Sozlamalar ---
-BOT_TOKEN = "BOT_TOKENINGNI_BU_YERGA_QO'Y"
-ADMIN_ID = 6733100026  # o'zingizning Telegram ID
+# --- Env yuklash ---
+load_dotenv()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- Ma'lumotlar (oddiy dictionary) ---
-movies = {}
-channels = []
+# --- JSON yuklash/saqlash ---
+def load_json(file, default):
+    if not os.path.exists(file):
+        with open(file, "w") as f:
+            json.dump(default, f)
+    with open(file, "r") as f:
+        return json.load(f)
+
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+movies = load_json("movies.json", {})
+channels = load_json("channels.json", [])
+users = load_json("users.json", {})
+
 waiting_for = {}
 
-# --- Flask route (browser uchun) ---
+# --- Flask route ---
 @app.route("/")
 def home():
-    return "✅ Kino bot ishlayapti!"
+    return "✅ Kino bot ishlayapti (telebot + Flask)"
 
-# --- Admin panel tugmalari ---
+# --- Admin panel ---
 def admin_menu_inline():
     kb = types.InlineKeyboardMarkup()
     kb.add(
@@ -39,6 +56,9 @@ def admin_menu_inline():
 # --- Start ---
 @bot.message_handler(commands=["start"])
 def start(message):
+    users[str(message.chat.id)] = True
+    save_json("users.json", users)
+
     if not check_subscription(message.chat.id):
         send_subscribe_message(message.chat.id)
         return
@@ -76,7 +96,7 @@ def admin_callbacks(call):
         bot.send_message(call.message.chat.id, "📢 Hammaga yuboriladigan xabarni yozing:")
         waiting_for[call.message.chat.id] = "broadcast"
 
-# --- Xabarlar ---
+# --- Kino va boshqa xabarlar ---
 @bot.message_handler(content_types=["text", "video"])
 def handle_message(message):
     user_id = message.chat.id
@@ -98,17 +118,20 @@ def handle_message(message):
             title = step["title"]
             file_id = message.video.file_id
             movies[number] = {"title": title, "file_id": file_id}
+            save_json("movies.json", movies)
             bot.send_message(user_id, f"✅ Kino qo‘shildi!\nRaqam: {number}\nNomi: {title}")
             del waiting_for[user_id]
             return
         elif step == "add_channel":
             channels.append(message.text)
+            save_json("channels.json", channels)
             bot.send_message(user_id, f"✅ Kanal qo‘shildi: {message.text}")
             del waiting_for[user_id]
             return
         elif step == "remove_channel":
             if message.text in channels:
                 channels.remove(message.text)
+                save_json("channels.json", channels)
                 bot.send_message(user_id, f"🗑 O‘chirildi: {message.text}")
             else:
                 bot.send_message(user_id, "❌ Kanal topilmadi")
@@ -150,16 +173,16 @@ def send_subscribe_message(user_id):
 
 # --- Hammaga xabar ---
 def send_broadcast(text):
-    for uid in movies.keys():  # bu yerda alohida userlar bazasini saqlash kerak
+    for uid in users.keys():
         try:
-            bot.send_message(uid, text)
+            bot.send_message(int(uid), text)
         except:
             pass
 
-# --- Botni fon rejimida ishga tushirish ---
+# --- Botni ishga tushirish ---
 def run_bot():
     bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
     threading.Thread(target=run_bot).start()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
