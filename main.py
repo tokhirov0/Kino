@@ -87,7 +87,7 @@ def admin_callbacks(call):
             text = "❌ Hali kino qo‘shilmagan."
         bot.send_message(call.message.chat.id, text)
     elif call.data == "add_channel":
-        bot.send_message(call.message.chat.id, "➕ Kanal username yoki ID yuboring:")
+        bot.send_message(call.message.chat.id, "➕ Kanal username yoki ID yuboring (private/public format):")
         waiting_for[call.message.chat.id] = "add_channel"
     elif call.data == "remove_channel":
         bot.send_message(call.message.chat.id, "➖ O‘chiriladigan kanal username yoki ID yuboring:")
@@ -123,16 +123,29 @@ def handle_message(message):
             del waiting_for[user_id]
             return
         elif step == "add_channel":
-            channels.append(message.text)
-            save_json("channels.json", channels)
-            bot.send_message(user_id, f"✅ Kanal qo‘shildi: {message.text}")
+            # private/public ajratish uchun JSON format kiritamiz
+            try:
+                parts = message.text.split("|")
+                ch_id = parts[0].strip()
+                ch_type = parts[1].strip().lower() if len(parts) > 1 else "public"
+                channels.append({"id": ch_id, "type": ch_type})
+                save_json("channels.json", channels)
+                bot.send_message(user_id, f"✅ Kanal qo‘shildi: {ch_id} ({ch_type})")
+            except:
+                bot.send_message(user_id, "❌ Format xato. Masalan: -100123456789|private yoki @kanalusername|public")
             del waiting_for[user_id]
             return
         elif step == "remove_channel":
-            if message.text in channels:
-                channels.remove(message.text)
+            ch_id = message.text.strip()
+            removed = False
+            for ch in channels:
+                if ch.get("id") == ch_id:
+                    channels.remove(ch)
+                    removed = True
+                    break
+            if removed:
                 save_json("channels.json", channels)
-                bot.send_message(user_id, f"🗑 O‘chirildi: {message.text}")
+                bot.send_message(user_id, f"🗑 O‘chirildi: {ch_id}")
             else:
                 bot.send_message(user_id, "❌ Kanal topilmadi")
             del waiting_for[user_id]
@@ -155,8 +168,9 @@ def check_subscription(user_id):
     if not channels:
         return True
     for ch in channels:
+        ch_id = ch["id"] if isinstance(ch, dict) else ch
         try:
-            member = bot.get_chat_member(ch, user_id)
+            member = bot.get_chat_member(ch_id, user_id)
             if member.status in ["member", "administrator", "creator"]:
                 continue
             else:
@@ -168,7 +182,19 @@ def check_subscription(user_id):
 def send_subscribe_message(user_id):
     kb = types.InlineKeyboardMarkup()
     for i, ch in enumerate(channels, 1):
-        kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=f"https://t.me/{ch.replace('@','')}"))
+        ch_id = ch["id"] if isinstance(ch, dict) else ch
+        ch_type = ch.get("type") if isinstance(ch, dict) else "public"
+
+        if ch_type == "private":
+            try:
+                invite = bot.create_chat_invite_link(ch_id)
+                kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=invite.invite_link))
+            except Exception as e:
+                print("Invite yaratishda xato:", e)
+                kb.add(types.InlineKeyboardButton(f"Kanal{i}", url="https://t.me/your_public_channel"))
+        else:
+            kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=f"https://t.me/{ch_id.replace('@','')}"))
+
     bot.send_message(user_id, "❗️ Botdan foydalanish uchun kanallarga obuna bo‘ling", reply_markup=kb)
 
 # --- Hammaga xabar ---
