@@ -4,7 +4,6 @@ from flask import Flask, request
 import telebot
 from dotenv import load_dotenv
 
-# .env yuklash
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -13,18 +12,15 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# Fayllar
 USERS_FILE = "users.json"
 MOVIES_FILE = "movies.json"
 CHANNELS_FILE = "channels.json"
 
-# Fayllarni yaratib qo‘yish
 for file in [USERS_FILE, MOVIES_FILE, CHANNELS_FILE]:
     if not os.path.exists(file):
         with open(file, "w") as f:
             json.dump([] if file != MOVIES_FILE else {}, f)
 
-# JSON o‘qish/yozish
 def load_json(file):
     with open(file, "r") as f:
         return json.load(f)
@@ -33,20 +29,17 @@ def save_json(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
-# Majburiy kanallarni tekshirish
 def check_subscribe(user_id):
     channels = load_json(CHANNELS_FILE)
     for ch in channels:
         try:
             status = bot.get_chat_member(ch["id"], user_id).status
-            # "pending" - so'rovda turganlar uchun ham ruxsat beramiz
             if status not in ["member", "administrator", "creator", "pending"]:
                 return False
         except Exception as e:
             return False
     return True
 
-# /start komandasi
 @bot.message_handler(commands=["start"])
 def start(message):
     users = load_json(USERS_FILE)
@@ -67,7 +60,6 @@ def start(message):
 
     bot.send_message(message.chat.id, "🎬 Xush kelibsiz! Kino raqamini yuboring.")
 
-# Tekshirish tugmasi
 @bot.callback_query_handler(func=lambda call: call.data == "check")
 def callback_check(call):
     if check_subscribe(call.from_user.id):
@@ -75,7 +67,6 @@ def callback_check(call):
     else:
         bot.send_message(call.from_user.id, "❌ Avval barcha kanallarga obuna bo‘ling.")
 
-# Kino raqam yuborganda
 @bot.message_handler(func=lambda m: m.text.isdigit())
 def get_movie(message):
     movies = load_json(MOVIES_FILE)
@@ -87,7 +78,6 @@ def get_movie(message):
     else:
         bot.send_message(message.chat.id, "❌ Bunday kino topilmadi.")
 
-# ===== ADMIN PANEL =====
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
     if message.chat.id == ADMIN_ID:
@@ -97,7 +87,6 @@ def admin_panel(message):
         markup.add("➕ Kanal qo‘shish", "❌ Kanal o‘chirish")
         bot.send_message(message.chat.id, "⚙️ Admin panel:", reply_markup=markup)
 
-# Kino qo‘shish
 @bot.message_handler(func=lambda m: m.text == "➕ Kino qo‘shish" and m.chat.id == ADMIN_ID)
 def ask_movie(message):
     msg = bot.reply_to(message, "🎥 Kino videosini yuboring:")
@@ -126,7 +115,6 @@ def save_movie(message, file_id):
 
     bot.send_message(message.chat.id, f"✅ Kino qo‘shildi!\nID: {new_id}")
 
-# Kino o‘chirish
 @bot.message_handler(func=lambda m: m.text == "❌ Kino o‘chirish" and m.chat.id == ADMIN_ID)
 def delete_movie(message):
     msg = bot.reply_to(message, "🗑 O‘chirmoqchi bo‘lgan kino ID raqamini yuboring:")
@@ -141,7 +129,6 @@ def confirm_delete(message):
     else:
         bot.send_message(message.chat.id, "❌ Bunday ID topilmadi.")
 
-# Hammaga xabar
 @bot.message_handler(func=lambda m: m.text == "📢 Hammaga xabar" and m.chat.id == ADMIN_ID)
 def ask_broadcast(message):
     msg = bot.reply_to(message, "✍️ Xabar matnini yuboring:")
@@ -156,14 +143,12 @@ def do_broadcast(message):
             pass
     bot.send_message(message.chat.id, "✅ Hammaga yuborildi.")
 
-# Statistika
 @bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.chat.id == ADMIN_ID)
 def stats(message):
     users = load_json(USERS_FILE)
     movies = load_json(MOVIES_FILE)
     bot.send_message(message.chat.id, f"👥 Foydalanuvchilar: {len(users)}\n🎬 Kinolar: {len(movies)}")
 
-# --- Kanal qo‘shish ---
 @bot.message_handler(func=lambda m: m.text == "➕ Kanal qo‘shish" and m.chat.id == ADMIN_ID)
 def ask_channel(message):
     msg = bot.reply_to(message, "Kanal ID (-100...) va invite-linkni vergul bilan yuboring:\nMasalan: -1001234567890, https://t.me/+invitecode")
@@ -181,7 +166,6 @@ def save_channel(message):
     except:
         bot.send_message(message.chat.id, "❌ Format xato. Masalan: -1001234567890, https://t.me/+invitecode")
 
-# --- Kanal o‘chirish ---
 @bot.message_handler(func=lambda m: m.text == "❌ Kanal o‘chirish" and m.chat.id == ADMIN_ID)
 def delete_channel(message):
     channels = load_json(CHANNELS_FILE)
@@ -204,7 +188,6 @@ def confirm_delete_channel(message):
     except:
         bot.send_message(message.chat.id, "❌ Xato format.")
 
-# Flask webhook
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
     json_update = request.stream.read().decode("utf-8")
