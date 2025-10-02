@@ -18,6 +18,7 @@ USERS_FILE = "users.json"
 MOVIES_FILE = "movies.json"
 CHANNELS_FILE = "channels.json"
 
+# Fayllarni yaratib qo‘yish
 for file in [USERS_FILE, MOVIES_FILE, CHANNELS_FILE]:
     if not os.path.exists(file):
         with open(file, "w") as f:
@@ -38,14 +39,14 @@ def check_subscribe(user_id):
     for ch in channels:
         try:
             status = bot.get_chat_member(ch["id"], user_id).status
-            # "member", "administrator", "creator" - to'liq a'zo. "pending" - so'rovda turganlar uchun ham ruxsat beramiz
+            # "pending" - so'rovda turganlar uchun ham ruxsat beramiz
             if status not in ["member", "administrator", "creator", "pending"]:
                 return False
-        except:
+        except Exception as e:
             return False
     return True
 
-# Start komandasi
+# /start komandasi
 @bot.message_handler(commands=["start"])
 def start(message):
     users = load_json(USERS_FILE)
@@ -107,6 +108,8 @@ def process_movie(message):
         file_id = message.video.file_id
         msg = bot.reply_to(message, "🎬 Kino nomini yuboring:")
         bot.register_next_step_handler(msg, save_movie, file_id)
+    else:
+        bot.reply_to(message, "❌ Faqat video yuboring!")
 
 def save_movie(message, file_id):
     movies = load_json(MOVIES_FILE)
@@ -118,7 +121,7 @@ def save_movie(message, file_id):
     for uid in users:
         try:
             bot.send_message(uid, f"📢 Yangi kino qo‘shildi!\n\n🎬 {message.text}\nID: {new_id}")
-        except:
+        except Exception as e:
             pass
 
     bot.send_message(message.chat.id, f"✅ Kino qo‘shildi!\nID: {new_id}")
@@ -160,7 +163,7 @@ def stats(message):
     movies = load_json(MOVIES_FILE)
     bot.send_message(message.chat.id, f"👥 Foydalanuvchilar: {len(users)}\n🎬 Kinolar: {len(movies)}")
 
-# --- YANGILANGAN KANAL QO'SHISH ---
+# --- Kanal qo‘shish ---
 @bot.message_handler(func=lambda m: m.text == "➕ Kanal qo‘shish" and m.chat.id == ADMIN_ID)
 def ask_channel(message):
     msg = bot.reply_to(message, "Kanal ID (-100...) va invite-linkni vergul bilan yuboring:\nMasalan: -1001234567890, https://t.me/+invitecode")
@@ -178,6 +181,7 @@ def save_channel(message):
     except:
         bot.send_message(message.chat.id, "❌ Format xato. Masalan: -1001234567890, https://t.me/+invitecode")
 
+# --- Kanal o‘chirish ---
 @bot.message_handler(func=lambda m: m.text == "❌ Kanal o‘chirish" and m.chat.id == ADMIN_ID)
 def delete_channel(message):
     channels = load_json(CHANNELS_FILE)
@@ -213,4 +217,5 @@ def index():
     return "Bot ishlayapti ✅"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
