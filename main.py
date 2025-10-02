@@ -1,8 +1,9 @@
 import os
 import json
-from flask import Flask, request
+import threading
 import telebot
 from telebot import types
+from flask import Flask, request
 from dotenv import load_dotenv
 
 # --- Env yuklash ---
@@ -13,7 +14,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID"))
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- JSON load/save ---
+# --- JSON yuklash/saqlash ---
 def load_json(file, default):
     if not os.path.exists(file):
         with open(file, "w") as f:
@@ -26,24 +27,23 @@ def save_json(file, data):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 movies = load_json("movies.json", {})
-channels = load_json("channels.json", [])
+channels = load_json("channels.json", {"public": [], "private": []})
 users = load_json("users.json", {})
+
 waiting_for = {}
 
-# --- Invite link caching ---
-def get_invite_link(ch_id):
-    try:
-        links = load_json("invite_links.json", {})
-        if ch_id in links:
-            return links[ch_id]
-        invite = bot.create_chat_invite_link(ch_id)
-        links[ch_id] = invite.invite_link
-        save_json("invite_links.json", links)
-        print(f"[INFO] Invite link yaratildi: {ch_id}")
-        return invite.invite_link
-    except Exception as e:
-        print(f"[ERROR] Invite yaratishda xato: {e}")
-        return "https://t.me/your_public_channel"
+# --- Flask route ---
+@app.route("/")
+def home():
+    return "✅ Kino bot ishlayapti (telebot + Flask)"
+
+# --- Webhook endpoint ---
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.stream.read().decode("utf-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
 
 # --- Admin panel ---
 def admin_menu_inline():
@@ -61,62 +61,25 @@ def admin_menu_inline():
     )
     return kb
 
-# --- Check subscription ---
-def check_subscription(user_id):
-    if not channels:
-        return True
-    for ch in channels:
-        ch_id = ch["id"] if isinstance(ch, dict) else ch
-        ch_type = ch.get("type") if isinstance(ch, dict) else "public"
-        try:
-            if ch_type == "private":
-                member = bot.get_chat_member(ch_id, user_id)
-                if member.status not in ["member", "administrator", "creator"]:
-                    return False
-            else:
-                member = bot.get_chat_member(ch_id, user_id)
-                if member.status not in ["member", "administrator", "creator"]:
-                    return False
-        except:
-            return False
-    return True
-
-# --- Send subscribe message ---
-def send_subscribe_message(user_id):
-    kb = types.InlineKeyboardMarkup()
-    for i, ch in enumerate(channels, 1):
-        ch_id = ch["id"] if isinstance(ch, dict) else ch
-        ch_type = ch.get("type") if isinstance(ch, dict) else "public"
-        if ch_type == "private":
-            url = get_invite_link(ch_id)
-        else:
-            url = f"https://t.me/{ch_id.replace('@','')}"
-        kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=url))
-    bot.send_message(user_id, "❗️ Botdan foydalanish uchun kanallarga obuna bo‘ling", reply_markup=kb)
-
-# --- Broadcast ---
-def send_broadcast(text):
-    for uid in users.keys():
-        try:
-            bot.send_message(int(uid), text)
-        except:
-            pass
-
-# --- Handlers ---
+# --- /start ---
 @bot.message_handler(commands=["start"])
 def start(message):
     users[str(message.chat.id)] = True
     save_json("users.json", users)
+
     if not check_subscription(message.chat.id):
         send_subscribe_message(message.chat.id)
         return
+
     bot.send_message(message.chat.id, "👋 Salom! Kino raqamini yuboring va men sizga yuboraman.")
 
+# --- Admin panel ---
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
     if message.chat.id == ADMIN_ID:
         bot.send_message(message.chat.id, "🔐 Admin panel:", reply_markup=admin_menu_inline())
 
+# --- Callback handler ---
 @bot.callback_query_handler(func=lambda call: True)
 def admin_callbacks(call):
     if call.message.chat.id != ADMIN_ID:
@@ -142,10 +105,11 @@ def admin_callbacks(call):
         bot.send_message(call.message.chat.id, "📢 Hammaga yuboriladigan xabarni yozing:")
         waiting_for[call.message.chat.id] = "broadcast"
 
+# --- Kino va boshqa xabarlar ---
 @bot.message_handler(content_types=["text", "video"])
 def handle_message(message):
     user_id = message.chat.id
-    # Admin workflow
+
     if user_id == ADMIN_ID and user_id in waiting_for:
         step = waiting_for[user_id]
         if step == "movie_number":
@@ -168,23 +132,27 @@ def handle_message(message):
             del waiting_for[user_id]
             return
         elif step == "add_channel":
-            channels.append({"id": message.text, "type": "public"})
+            ch = message.text
+            if ch.startswith("-100"):  # shaxsiy kanal
+                channels.setdefault("private", []).append(ch)
+            else:  # ochiq kanal
+                channels.setdefault("public", []).append(ch)
             save_json("channels.json", channels)
-            bot.send_message(user_id, f"✅ Kanal qo‘shildi: {message.text}")
+            bot.send_message(user_id, f"✅ Kanal qo‘shildi: {ch}")
             del waiting_for[user_id]
             return
         elif step == "remove_channel":
-            found = False
-            for ch in channels:
-                ch_id = ch["id"] if isinstance(ch, dict) else ch
-                if ch_id == message.text:
-                    channels.remove(ch)
-                    save_json("channels.json", channels)
-                    bot.send_message(user_id, f"🗑 O‘chirildi: {message.text}")
-                    found = True
-                    break
-            if not found:
+            ch = message.text
+            if ch in channels.get("private", []):
+                channels["private"].remove(ch)
+            elif ch in channels.get("public", []):
+                channels["public"].remove(ch)
+            else:
                 bot.send_message(user_id, "❌ Kanal topilmadi")
+                del waiting_for[user_id]
+                return
+            save_json("channels.json", channels)
+            bot.send_message(user_id, f"🗑 O‘chirildi: {ch}")
             del waiting_for[user_id]
             return
         elif step == "broadcast":
@@ -192,7 +160,6 @@ def handle_message(message):
             del waiting_for[user_id]
             return
 
-    # User kino request
     if message.text.isdigit():
         number = message.text
         if number in movies:
@@ -201,17 +168,46 @@ def handle_message(message):
         else:
             bot.send_message(user_id, "❌ Bunday kino topilmadi.")
 
-# --- Flask webhook endpoint ---
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    json_str = request.stream.read().decode("utf-8")
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
-    return "!", 200
+# --- Kanal tekshirish ---
+def check_subscription(user_id):
+    # Ochiq kanallarni tekshirish
+    for ch in channels.get("public", []):
+        try:
+            member = bot.get_chat_member(ch, user_id)
+            if member.status not in ["member", "administrator", "creator"]:
+                return False
+        except:
+            return False
+    # Shaxsiy kanallarni tekshirishni o'tkazib yuboradi
+    return True
 
-@app.route("/")
-def home():
-    return "✅ Kino bot ishlayapti!"
+def send_subscribe_message(user_id):
+    kb = types.InlineKeyboardMarkup()
+    # Ochiq kanallar
+    for i, ch in enumerate(channels.get("public", []), 1):
+        kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=f"https://t.me/{ch.replace('@','')}"))
+    # Shaxsiy kanallar
+    for i, ch in enumerate(channels.get("private", []), 1):
+        try:
+            invite = bot.create_chat_invite_link(ch)
+            kb.add(types.InlineKeyboardButton(f"Shaxsiy Kanal{i}", url=invite.invite_link))
+        except Exception as e:
+            kb.add(types.InlineKeyboardButton(f"Shaxsiy Kanal{i} (bot admin emas!)", url=f"https://t.me/YourChannelUsername"))
+            print(f"Invite yaratishda xato: {e}")
+    bot.send_message(user_id, "❗️ Botdan foydalanish uchun kanallarga obuna bo‘ling", reply_markup=kb)
+
+# --- Hammaga xabar ---
+def send_broadcast(text):
+    for uid in users.keys():
+        try:
+            bot.send_message(int(uid), text)
+        except:
+            pass
+
+# --- Botni ishga tushirish ---
+def run_bot():
+    bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
+    threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
