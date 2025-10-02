@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
+PORT = int(os.getenv("PORT", 10000))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
@@ -44,20 +45,16 @@ def webhook():
     bot.process_new_updates([update])
     return "!", 200
 
-# --- Admin panel ---
+# --- Admin panel tugmalari ---
 def admin_menu_inline():
     kb = types.InlineKeyboardMarkup()
-    kb.add(
-        types.InlineKeyboardButton("🎬 Kino qo‘shish", callback_data="add_movie"),
-        types.InlineKeyboardButton("📂 Kino ro‘yxati", callback_data="list_movies")
-    )
-    kb.add(
-        types.InlineKeyboardButton("➕ Kanal qo‘shish", callback_data="add_channel"),
-        types.InlineKeyboardButton("➖ Kanal o‘chirish", callback_data="remove_channel")
-    )
-    kb.add(
-        types.InlineKeyboardButton("📢 Hammaga xabar", callback_data="broadcast")
-    )
+    kb.add(types.InlineKeyboardButton("🎬 Kino qo‘shish", callback_data="add_movie"))
+    kb.add(types.InlineKeyboardButton("📂 Kino ro‘yxati", callback_data="list_movies"))
+    kb.add(types.InlineKeyboardButton("❌ Kino o‘chirish", callback_data="delete_movie"))
+    kb.add(types.InlineKeyboardButton("➕ Kanal qo‘shish", callback_data="add_channel"))
+    kb.add(types.InlineKeyboardButton("➖ Kanal o‘chirish", callback_data="remove_channel"))
+    kb.add(types.InlineKeyboardButton("📊 Statistika", callback_data="stats"))
+    kb.add(types.InlineKeyboardButton("📢 Hammaga xabar", callback_data="broadcast"))
     return kb
 
 # --- /start ---
@@ -72,7 +69,7 @@ def start(message):
 
     bot.send_message(message.chat.id, "👋 Salom! Kino raqamini yuboring va men sizga yuboraman.")
 
-# --- Admin panel ---
+# --- /admin ---
 @bot.message_handler(commands=["admin"])
 def admin_panel(message):
     if message.chat.id == ADMIN_ID:
@@ -94,12 +91,18 @@ def admin_callbacks(call):
         else:
             text = "❌ Hali kino qo‘shilmagan."
         bot.send_message(call.message.chat.id, text)
+    elif call.data == "delete_movie":
+        bot.send_message(call.message.chat.id, "❌ O‘chiriladigan kino raqamini yuboring:")
+        waiting_for[call.message.chat.id] = "delete_movie"
     elif call.data == "add_channel":
         bot.send_message(call.message.chat.id, "➕ Kanal username yoki ID yuboring:")
         waiting_for[call.message.chat.id] = "add_channel"
     elif call.data == "remove_channel":
-        bot.send_message(call.message.chat.id, "➖ O‘chiriladigan kanal username yoki ID yuboring:")
+        bot.send_message(call.message.chat.id, "➖ O‘chiriladigan kanalni yuboring:")
         waiting_for[call.message.chat.id] = "remove_channel"
+    elif call.data == "stats":
+        text = f"📊 Foydalanuvchilar: {len(users)}\n🎬 Kinolar: {len(movies)}\n📢 Kanallar: {len(channels.get('public', [])) + len(channels.get('private', []))}"
+        bot.send_message(call.message.chat.id, text)
     elif call.data == "broadcast":
         bot.send_message(call.message.chat.id, "📢 Hammaga yuboriladigan xabarni yozing:")
         waiting_for[call.message.chat.id] = "broadcast"
@@ -130,11 +133,21 @@ def handle_message(message):
             bot.send_message(user_id, f"✅ Kino qo‘shildi!\nRaqam: {number}\nNomi: {title}")
             del waiting_for[user_id]
             return
+        elif step == "delete_movie":
+            number = message.text
+            if number in movies:
+                del movies[number]
+                save_json("movies.json", movies)
+                bot.send_message(user_id, f"🗑 Kino o‘chirildi: {number}")
+            else:
+                bot.send_message(user_id, "❌ Kino topilmadi")
+            del waiting_for[user_id]
+            return
         elif step == "add_channel":
             ch = message.text
-            if ch.startswith("-100"):  # shaxsiy kanal
+            if ch.startswith("-100"):
                 channels.setdefault("private", []).append(ch)
-            else:  # ochiq kanal
+            else:
                 channels.setdefault("public", []).append(ch)
             save_json("channels.json", channels)
             bot.send_message(user_id, f"✅ Kanal qo‘shildi: {ch}")
@@ -148,8 +161,6 @@ def handle_message(message):
                 channels["public"].remove(ch)
             else:
                 bot.send_message(user_id, "❌ Kanal topilmadi")
-                del waiting_for[user_id]
-                return
             save_json("channels.json", channels)
             bot.send_message(user_id, f"🗑 O‘chirildi: {ch}")
             del waiting_for[user_id]
@@ -169,7 +180,6 @@ def handle_message(message):
 
 # --- Kanal tekshirish ---
 def check_subscription(user_id):
-    # Ochiq kanallarni tekshirish
     for ch in channels.get("public", []):
         try:
             member = bot.get_chat_member(ch, user_id)
@@ -177,22 +187,12 @@ def check_subscription(user_id):
                 return False
         except:
             return False
-    # Shaxsiy kanallarni tekshirishni o'tkazib yuboradi
     return True
 
 def send_subscribe_message(user_id):
     kb = types.InlineKeyboardMarkup()
-    # Ochiq kanallar
     for i, ch in enumerate(channels.get("public", []), 1):
-        kb.add(types.InlineKeyboardButton(f"Kanal{i}", url=f"https://t.me/{ch.replace('@','')}"))
-    # Shaxsiy kanallar
-    for i, ch in enumerate(channels.get("private", []), 1):
-        try:
-            invite = bot.create_chat_invite_link(ch)
-            kb.add(types.InlineKeyboardButton(f"Shaxsiy Kanal{i}", url=invite.invite_link))
-        except Exception as e:
-            kb.add(types.InlineKeyboardButton(f"Shaxsiy Kanal{i} (bot admin emas!)", url=f"https://t.me/YourChannelUsername"))
-            print(f"Invite yaratishda xato: {e}")
+        kb.add(types.InlineKeyboardButton(f"Kanal {i}", url=f"https://t.me/{ch.replace('@','')}"))
     bot.send_message(user_id, "❗️ Botdan foydalanish uchun kanallarga obuna bo‘ling", reply_markup=kb)
 
 # --- Hammaga xabar ---
@@ -203,6 +203,6 @@ def send_broadcast(text):
         except:
             pass
 
-# --- Botni ishga tushirish ---
+# --- Flask run ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=PORT)
