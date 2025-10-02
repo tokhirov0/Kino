@@ -36,7 +36,7 @@ def check_subscribe(user_id):
             status = bot.get_chat_member(ch["id"], user_id).status
             if status not in ["member", "administrator", "creator", "pending"]:
                 return False
-        except Exception as e:
+        except Exception:
             return False
     return True
 
@@ -110,7 +110,7 @@ def save_movie(message, file_id):
     for uid in users:
         try:
             bot.send_message(uid, f"📢 Yangi kino qo‘shildi!\n\n🎬 {message.text}\nID: {new_id}")
-        except Exception as e:
+        except Exception:
             pass
 
     bot.send_message(message.chat.id, f"✅ Kino qo‘shildi!\nID: {new_id}")
@@ -139,7 +139,7 @@ def do_broadcast(message):
     for uid in users:
         try:
             bot.send_message(uid, f"📢 {message.text}")
-        except:
+        except Exception:
             pass
     bot.send_message(message.chat.id, "✅ Hammaga yuborildi.")
 
@@ -163,7 +163,7 @@ def save_channel(message):
         channels.append({"id": ch_id, "link": ch_link})
         save_json(CHANNELS_FILE, channels)
         bot.send_message(message.chat.id, "✅ Kanal qo‘shildi.")
-    except:
+    except Exception:
         bot.send_message(message.chat.id, "❌ Format xato. Masalan: -1001234567890, https://t.me/+invitecode")
 
 @bot.message_handler(func=lambda m: m.text == "❌ Kanal o‘chirish" and m.chat.id == ADMIN_ID)
@@ -185,7 +185,7 @@ def confirm_delete_channel(message):
             bot.send_message(message.chat.id, f"✅ Kanal o‘chirildi: {deleted['link']}")
         else:
             bot.send_message(message.chat.id, "❌ Noto‘g‘ri raqam.")
-    except:
+    except Exception:
         bot.send_message(message.chat.id, "❌ Xato format.")
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
