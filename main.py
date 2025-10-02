@@ -1,6 +1,5 @@
 import os
 import json
-import threading
 import telebot
 from telebot import types
 from flask import Flask, request
@@ -205,9 +204,5 @@ def send_broadcast(text):
             pass
 
 # --- Botni ishga tushirish ---
-def run_bot():
-    bot.infinity_polling(skip_pending=True)
-
 if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
